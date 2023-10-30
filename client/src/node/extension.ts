@@ -56,8 +56,11 @@ const activeProfileStatusBarIcon = window.createStatusBarItem(
   0,
 );
 
+export let extensionContext: ExtensionContext | undefined;
+
 export function activate(context: ExtensionContext): void {
   // The server is implemented in node
+  extensionContext = context;
   const serverModule = context.asAbsolutePath(
     path.join("server", "dist", "node", "server.js"),
   );
