@@ -11,6 +11,8 @@ import { extensionContext } from "../../node/extension";
 import { Session } from "../session";
 import { scriptContent } from "./script";
 
+const PASSWORD_KEY = "ITC_PASSWORD_KEY";
+
 const endCode = "--vscode-sas-extension-submit-end--";
 let sessionInstance: COMSession;
 
@@ -36,9 +38,11 @@ export class COMSession extends Session {
   private _runResolve: ((value?) => void) | undefined;
   private _runReject: ((reason?) => void) | undefined;
   private _workDirectory: string;
+  private password: string;
 
   constructor() {
     super();
+    this.password = "";
   }
 
   public set config(value: Config) {
@@ -50,13 +54,14 @@ export class COMSession extends Session {
    * @returns void promise.
    */
   public setup = async (): Promise<void> => {
-    return new Promise(async (resolve, reject) => {
+    const password = await this.fetchPassword();
+    return new Promise((resolve, reject) => {
       this._runResolve = resolve;
       this._runReject = reject;
 
       if (this._shellProcess && !this._shellProcess.killed) {
         resolve();
-        return; //manually terminate to avoid executing the code below
+        return; // manually terminate to avoid executing the code below
       }
 
       this._shellProcess = spawn("powershell.exe /nologo -Command -", {
@@ -74,8 +79,6 @@ export class COMSession extends Session {
         this.onWriteComplete,
       );
 
-      const password = await this.fetchPassword();
-
       /*
        * There are cases where the higher level run command will invoke setup multiple times.
        * Avoid re-initializing the session when this happens. In a first run scenario a work dir
@@ -83,14 +86,16 @@ export class COMSession extends Session {
        */
       if (!this._workDirectory) {
         const { host, port, protocol, username } = this._config;
-        const serverName =
-          protocol === ITCProtocol.COM ? "ITC Local" : "ITC IOM Bridge";
         this._shellProcess.stdin.write(`$profileHost = "${host}"\n`);
         this._shellProcess.stdin.write(`$port = ${port}\n`);
         this._shellProcess.stdin.write(`$protocol = ${protocol}\n`);
         this._shellProcess.stdin.write(`$username = "${username}"\n`);
         this._shellProcess.stdin.write(`$password = "${password}"\n`);
-        this._shellProcess.stdin.write(`$serverName = "${protocol === ITCProtocol.COM ? "ITC Local" : "ITC IOM Bridge"}"\n`);
+        this._shellProcess.stdin.write(
+          `$serverName = "${
+            protocol === ITCProtocol.COM ? "ITC Local" : "ITC IOM Bridge"
+          }"\n`,
+        );
         this._shellProcess.stdin.write(
           `$runner.Setup($profileHost,$username,$password,$port,$protocol,$serverName)\n`,
           this.onWriteComplete,
@@ -119,19 +124,33 @@ export class COMSession extends Session {
     });
   };
 
+  private storePassword = async () => {
+    await extensionContext.secrets.store(PASSWORD_KEY, this.password);
+  };
+
+  private clearPassword = async () => {
+    await extensionContext.secrets.delete(PASSWORD_KEY);
+    this.password = "";
+  };
+
   private fetchPassword = async (): Promise<string> => {
     if (this._config.protocol === ITCProtocol.COM) {
       return "";
     }
 
-    const password = await vscode.window.showInputBox({
+    const storedPassword = await extensionContext.secrets.get(PASSWORD_KEY);
+    if (storedPassword) {
+      return storedPassword;
+    }
+
+    this.password = await vscode.window.showInputBox({
       title: "Enter a password",
       placeHolder: "Thing",
       prompt: "Do something",
       ignoreFocusOut: true,
     });
 
-    return password;
+    return this.password;
   };
 
   /**
@@ -223,6 +242,7 @@ do {
   private onShellStdErr = (chunk: Buffer): void => {
     const msg = chunk.toString();
     console.warn("shellProcess stderr: " + msg);
+    this.clearPassword();
     this._runReject(
       new Error(
         "There was an error executing the SAS Program.\nSee console log for more details.",
@@ -325,6 +345,7 @@ do {
       runResult.html5 = htmlResults;
       runResult.title = "Result";
     }
+    this.storePassword();
     this._runResolve(runResult);
   };
 }
