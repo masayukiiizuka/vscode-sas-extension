@@ -143,12 +143,13 @@ export class COMSession extends Session {
       return storedPassword;
     }
 
-    this.password = await window.showInputBox({
-      ignoreFocusOut: true,
-      password: true,
-      prompt: l10n.t("Enter your password for this connection."),
-      title: l10n.t("Enter your password"),
-    });
+    this.password =
+      (await window.showInputBox({
+        ignoreFocusOut: true,
+        password: true,
+        prompt: l10n.t("Enter your password for this connection."),
+        title: l10n.t("Enter your password"),
+      })) || "";
 
     return this.password;
   };
@@ -333,10 +334,11 @@ do {
       }, 1000);
     });
 
-    // Error checking
+    const htmlResults = (file || "").toString();
+    if (file) {
+      workspace.fs.delete(outputFileUri);
+    }
 
-    const htmlResults = file.toString();
-    workspace.fs.delete(outputFileUri);
     const runResult: RunResult = {};
     if (htmlResults.search('<*id="IDX*.+">') !== -1) {
       runResult.html5 = htmlResults;
